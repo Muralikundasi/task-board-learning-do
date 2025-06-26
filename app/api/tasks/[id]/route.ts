@@ -1,31 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { supabaseServer } from "@/lib/supabase-server"
 import type { Task, UpdateTaskRequest, ApiResponse } from "@/types/task"
-
-// In-memory storage for tasks (shared with main route)
-// Note: In a real app, this would be in a database or shared state management
-const tasks: Task[] = [
-  {
-    id: "1",
-    title: "Design Homepage",
-    description: "Create wireframes and mockups for the new homepage layout",
-    status: "todo",
-    createdAt: new Date("2024-01-15T10:00:00Z"),
-  },
-  {
-    id: "2",
-    title: "Setup Database",
-    description: "Configure PostgreSQL database and create initial schema",
-    status: "in-progress",
-    createdAt: new Date("2024-01-14T14:30:00Z"),
-  },
-  {
-    id: "3",
-    title: "User Authentication",
-    description: "Implement login and registration functionality",
-    status: "done",
-    createdAt: new Date("2024-01-13T09:15:00Z"),
-  },
-]
 
 // PUT /api/tasks/[id] - Update existing task
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
@@ -33,15 +8,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const { id } = params
     const body: UpdateTaskRequest = await request.json()
 
-    // Find the task
-    const taskIndex = tasks.findIndex((task) => task.id === id)
-
-    if (taskIndex === -1) {
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
       const errorResponse: ApiResponse = {
         success: false,
-        error: `Task with id ${id} not found`,
+        error: "Invalid task ID format",
       }
-      return NextResponse.json(errorResponse, { status: 404 })
+      return NextResponse.json(errorResponse, { status: 400 })
     }
 
     // Validate fields if provided
@@ -72,20 +46,58 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       }
     }
 
-    // Update the task
-    const currentTask = tasks[taskIndex]
-    const updatedTask: Task = {
-      ...currentTask,
-      ...(body.title !== undefined && { title: body.title.trim() }),
-      ...(body.description !== undefined && { description: body.description.trim() }),
-      ...(body.status !== undefined && { status: body.status }),
+    // Prepare update object
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
     }
 
-    tasks[taskIndex] = updatedTask
+    if (body.title !== undefined) {
+      updateData.title = body.title.trim()
+    }
+    if (body.description !== undefined) {
+      updateData.description = body.description.trim()
+    }
+    if (body.status !== undefined) {
+      updateData.status = body.status
+    }
+
+    // Update task in database
+    const { data: updatedTask, error } = await supabaseServer
+      .from("tasks")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      if (error.code === "PGRST116") {
+        const errorResponse: ApiResponse = {
+          success: false,
+          error: `Task with id ${id} not found`,
+        }
+        return NextResponse.json(errorResponse, { status: 404 })
+      }
+      const errorResponse: ApiResponse = {
+        success: false,
+        error: "Failed to update task in database",
+      }
+      return NextResponse.json(errorResponse, { status: 500 })
+    }
+
+    // Transform database row to Task object
+    const transformedTask: Task = {
+      id: updatedTask.id,
+      title: updatedTask.title,
+      description: updatedTask.description,
+      status: updatedTask.status,
+      created_at: updatedTask.created_at,
+      updated_at: updatedTask.updated_at,
+    }
 
     const response: ApiResponse<Task> = {
       success: true,
-      data: updatedTask,
+      data: transformedTask,
       message: "Task updated successfully",
     }
 
@@ -107,26 +119,48 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   try {
     const { id } = params
 
-    // Find the task
-    const taskIndex = tasks.findIndex((task) => task.id === id)
-
-    if (taskIndex === -1) {
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
       const errorResponse: ApiResponse = {
         success: false,
-        error: `Task with id ${id} not found`,
+        error: "Invalid task ID format",
       }
-      return NextResponse.json(errorResponse, { status: 404 })
+      return NextResponse.json(errorResponse, { status: 400 })
     }
 
-    // Get the task before deletion for response
-    const deletedTask = tasks[taskIndex]
+    // Delete task from database
+    const { data: deletedTask, error } = await supabaseServer.from("tasks").delete().eq("id", id).select().single()
 
-    // Remove the task
-    tasks.splice(taskIndex, 1)
+    if (error) {
+      console.error("Supabase error:", error)
+      if (error.code === "PGRST116") {
+        const errorResponse: ApiResponse = {
+          success: false,
+          error: `Task with id ${id} not found`,
+        }
+        return NextResponse.json(errorResponse, { status: 404 })
+      }
+      const errorResponse: ApiResponse = {
+        success: false,
+        error: "Failed to delete task from database",
+      }
+      return NextResponse.json(errorResponse, { status: 500 })
+    }
+
+    // Transform database row to Task object
+    const transformedTask: Task = {
+      id: deletedTask.id,
+      title: deletedTask.title,
+      description: deletedTask.description,
+      status: deletedTask.status,
+      created_at: deletedTask.created_at,
+      updated_at: deletedTask.updated_at,
+    }
 
     const response: ApiResponse<Task> = {
       success: true,
-      data: deletedTask,
+      data: transformedTask,
       message: "Task deleted successfully",
     }
 

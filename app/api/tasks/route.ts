@@ -1,38 +1,38 @@
 import { type NextRequest, NextResponse } from "next/server"
-import type { Task, CreateTaskRequest, ApiResponse } from "@/types/task"
-
-// In-memory storage for tasks
-const tasks: Task[] = [
-  {
-    id: "1",
-    title: "Design Homepage",
-    description: "Create wireframes and mockups for the new homepage layout",
-    status: "todo",
-    createdAt: new Date("2024-01-15T10:00:00Z"),
-  },
-  {
-    id: "2",
-    title: "Setup Database",
-    description: "Configure PostgreSQL database and create initial schema",
-    status: "in-progress",
-    createdAt: new Date("2024-01-14T14:30:00Z"),
-  },
-  {
-    id: "3",
-    title: "User Authentication",
-    description: "Implement login and registration functionality",
-    status: "done",
-    createdAt: new Date("2024-01-13T09:15:00Z"),
-  },
-]
+import { supabaseServer } from "@/lib/supabase-server"
+import type { Task, CreateTaskRequest, ApiResponse, TaskRow } from "@/types/task"
 
 // GET /api/tasks - Get all tasks
 export async function GET() {
   try {
+    const { data: tasks, error } = await supabaseServer
+      .from("tasks")
+      .select("*")
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Supabase error:", error)
+      const errorResponse: ApiResponse = {
+        success: false,
+        error: "Failed to fetch tasks from database",
+      }
+      return NextResponse.json(errorResponse, { status: 500 })
+    }
+
+    // Transform database rows to Task objects
+    const transformedTasks: Task[] = (tasks as TaskRow[]).map((task) => ({
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      created_at: task.created_at,
+      updated_at: task.updated_at,
+    }))
+
     const response: ApiResponse<Task[]> = {
       success: true,
-      data: tasks,
-      message: `Retrieved ${tasks.length} tasks successfully`,
+      data: transformedTasks,
+      message: `Retrieved ${transformedTasks.length} tasks successfully`,
     }
 
     return NextResponse.json(response, { status: 200 })
@@ -81,21 +81,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(errorResponse, { status: 400 })
     }
 
-    // Create new task
-    const newTask: Task = {
-      id: Date.now().toString(),
-      title: body.title.trim(),
-      description: body.description.trim(),
-      status: body.status,
-      createdAt: new Date(),
+    // Insert new task into database
+    const { data: newTask, error } = await supabaseServer
+      .from("tasks")
+      .insert([
+        {
+          title: body.title.trim(),
+          description: body.description.trim(),
+          status: body.status,
+        },
+      ])
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      const errorResponse: ApiResponse = {
+        success: false,
+        error: "Failed to create task in database",
+      }
+      return NextResponse.json(errorResponse, { status: 500 })
     }
 
-    // Add to tasks array
-    tasks.push(newTask)
+    // Transform database row to Task object
+    const transformedTask: Task = {
+      id: newTask.id,
+      title: newTask.title,
+      description: newTask.description,
+      status: newTask.status,
+      created_at: newTask.created_at,
+      updated_at: newTask.updated_at,
+    }
 
     const response: ApiResponse<Task> = {
       success: true,
-      data: newTask,
+      data: transformedTask,
       message: "Task created successfully",
     }
 

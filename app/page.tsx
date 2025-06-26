@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -15,9 +15,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Plus, Trash2 } from "lucide-react"
+import { Plus, Trash2, Loader2 } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
+import { Toaster } from "@/components/ui/toaster"
 import type { Task, TaskStatus } from "@/types/task"
-import { DragDropContext, Droppable, Draggable, DropResult, DroppableProvided, DraggableProvided } from "@hello-pangea/dnd"
+import { TaskApiClient } from "@/lib/api-client"
+import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd"
 
 const COLUMNS: { id: TaskStatus; title: string; color: string }[] = [
   { id: "todo", title: "To Do", color: "border-l-blue-500" },
@@ -26,92 +29,144 @@ const COLUMNS: { id: TaskStatus; title: string; color: string }[] = [
 ]
 
 export default function TaskBoard() {
-  const [tasks, setTasks] = useState<Task[]>([
-    {
-      id: "1",
-      title: "Design Homepage",
-      description: "Create wireframes and mockups for the new homepage layout",
-      status: "todo",
-      createdAt: new Date(),
-    },
-    {
-      id: "2",
-      title: "Setup Database",
-      description: "Configure PostgreSQL database and create initial schema",
-      status: "in-progress",
-      createdAt: new Date(),
-    },
-    {
-      id: "3",
-      title: "User Authentication",
-      description: "Implement login and registration functionality",
-      status: "done",
-      createdAt: new Date(),
-    },
-  ])
-
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
   const [newTask, setNewTask] = useState({ title: "", description: "", status: "todo" as TaskStatus })
+  const { toast } = useToast()
 
-  const addTask = () => {
-    if (newTask.title.trim() && newTask.description.trim()) {
-      const task: Task = {
-        id: Date.now().toString(),
-        title: newTask.title,
-        description: newTask.description,
-        status: newTask.status,
-        createdAt: new Date(),
-      }
-      setTasks([...tasks, task])
-      setNewTask({ title: "", description: "", status: "todo" })
-      setIsDialogOpen(false)
+  // Load tasks on component mount
+  useEffect(() => {
+    loadTasks()
+  }, [])
+
+  const loadTasks = async () => {
+    try {
+      setIsLoading(true)
+      const fetchedTasks = await TaskApiClient.getAllTasks()
+      setTasks(fetchedTasks)
+    } catch (error) {
+      console.error("Error loading tasks:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load tasks. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  const deleteTask = (taskId: string) => {
-    setTasks(tasks.filter((task) => task.id !== taskId))
+  const addTask = async () => {
+    if (!newTask.title.trim() || !newTask.description.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in both title and description.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setIsCreating(true)
+      const createdTask = await TaskApiClient.createTask({
+        title: newTask.title,
+        description: newTask.description,
+        status: newTask.status,
+      })
+
+      setTasks([createdTask, ...tasks])
+      setNewTask({ title: "", description: "", status: "todo" })
+      setIsDialogOpen(false)
+
+      toast({
+        title: "Success",
+        description: "Task created successfully!",
+      })
+    } catch (error) {
+      console.error("Error creating task:", error)
+      toast({
+        title: "Error",
+        description: "Failed to create task. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsCreating(false)
+    }
   }
 
-  const moveTask = (taskId: string, newStatus: TaskStatus) => {
-    setTasks(tasks.map((task) => (task.id === taskId ? { ...task, status: newStatus } : task)))
+  const deleteTask = async (taskId: string) => {
+    try {
+      await TaskApiClient.deleteTask(taskId)
+      setTasks(tasks.filter((task) => task.id !== taskId))
+
+      toast({
+        title: "Success",
+        description: "Task deleted successfully!",
+      })
+    } catch (error) {
+      console.error("Error deleting task:", error)
+      toast({
+        title: "Error",
+        description: "Failed to delete task. Please try again.",
+        variant: "destructive",
+      })
+    }
   }
 
   const getTasksByStatus = (status: TaskStatus) => {
     return tasks.filter((task) => task.status === status)
   }
 
-  const onDragEnd = (result: DropResult) => {
+  const onDragEnd = async (result: DropResult) => {
     const { destination, source, draggableId } = result
     if (!destination) return
-    if (
-      destination.droppableId === source.droppableId &&
-      destination.index === source.index
-    ) {
+    if (destination.droppableId === source.droppableId && destination.index === source.index) {
       return
     }
+
+    // Optimistically update UI
+    const newStatus = destination.droppableId as TaskStatus
     setTasks((prev) => {
       const task = prev.find((t) => t.id === draggableId)
       if (!task) return prev
-      // Remove from old status
-      const filtered = prev.filter((t) => t.id !== draggableId)
-      // Insert into new status at correct index
-      const updatedTask = { ...task, status: destination.droppableId as TaskStatus }
-      // Get all tasks for the new status
-      const before = filtered.filter((t, i) =>
-        t.status === destination.droppableId && i < destination.index
-      )
-      const after = filtered.filter((t, i) =>
-        t.status === destination.droppableId && i >= destination.index
-      )
-      // Insert updatedTask at the right place
-      const others = filtered.filter((t) => t.status !== destination.droppableId)
-      return [
-        ...others,
-        ...before,
-        updatedTask,
-        ...after,
-      ]
+      return prev.map((t) => (t.id === draggableId ? { ...t, status: newStatus } : t))
     })
+
+    // Update in database
+    try {
+      await TaskApiClient.updateTask(draggableId, { status: newStatus })
+      toast({
+        title: "Success",
+        description: "Task moved successfully!",
+      })
+    } catch (error) {
+      // Revert optimistic update on error
+      setTasks((prev) => {
+        const task = prev.find((t) => t.id === draggableId)
+        if (!task) return prev
+        return prev.map((t) => (t.id === draggableId ? { ...t, status: source.droppableId as TaskStatus } : t))
+      })
+
+      console.error("Error moving task:", error)
+      toast({
+        title: "Error",
+        description: "Failed to move task. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex items-center space-x-2">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <span>Loading tasks...</span>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -170,8 +225,9 @@ export default function TaskBoard() {
                 </div>
               </div>
               <DialogFooter>
-                <Button type="submit" onClick={addTask}>
-                  Add Task
+                <Button type="submit" onClick={addTask} disabled={isCreating}>
+                  {isCreating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  {isCreating ? "Creating..." : "Add Task"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -180,64 +236,65 @@ export default function TaskBoard() {
 
         {/* Task Board */}
         <DragDropContext onDragEnd={onDragEnd}>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {COLUMNS.map((column) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {COLUMNS.map((column) => (
               <Droppable droppableId={column.id} key={column.id}>
-                {(provided: DroppableProvided) => (
+                {(provided) => (
                   <div
                     ref={provided.innerRef}
                     {...provided.droppableProps}
                     className="bg-white rounded-lg shadow-sm border flex flex-col"
                   >
-              {/* Column Header */}
-              <div className={`p-4 border-b border-l-4 ${column.color}`}>
-                <h2 className="font-semibold text-gray-900">{column.title}</h2>
-                <p className="text-sm text-gray-500 mt-1">{getTasksByStatus(column.id).length} tasks</p>
-              </div>
-              {/* Tasks */}
+                    {/* Column Header */}
+                    <div className={`p-4 border-b border-l-4 ${column.color}`}>
+                      <h2 className="font-semibold text-gray-900">{column.title}</h2>
+                      <p className="text-sm text-gray-500 mt-1">{getTasksByStatus(column.id).length} tasks</p>
+                    </div>
+                    {/* Tasks */}
                     <div className="p-4 space-y-3 min-h-[400px] flex-1">
                       {getTasksByStatus(column.id).map((task, idx) => (
                         <Draggable draggableId={task.id} index={idx} key={task.id}>
-                          {(provided: DraggableProvided) => (
-                            <div
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                            >
+                          {(provided) => (
+                            <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}>
                               <Card className="group hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <CardTitle className="text-sm font-medium leading-tight">{task.title}</CardTitle>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => deleteTask(task.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      <CardDescription className="text-xs leading-relaxed mb-3">{task.description}</CardDescription>
-                    </CardContent>
-                  </Card>
+                                <CardHeader className="pb-3">
+                                  <div className="flex items-start justify-between">
+                                    <CardTitle className="text-sm font-medium leading-tight">{task.title}</CardTitle>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      onClick={() => deleteTask(task.id)}
+                                    >
+                                      <Trash2 className="h-4 w-4 text-red-500" />
+                                    </Button>
+                                  </div>
+                                </CardHeader>
+                                <CardContent className="pt-0">
+                                  <CardDescription className="text-xs leading-relaxed mb-3">
+                                    {task.description}
+                                  </CardDescription>
+                                  <div className="text-xs text-gray-400">
+                                    Created: {new Date(task.created_at).toLocaleDateString()}
+                                  </div>
+                                </CardContent>
+                              </Card>
                             </div>
                           )}
                         </Draggable>
-                ))}
+                      ))}
                       {provided.placeholder}
-                {getTasksByStatus(column.id).length === 0 && (
-                  <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
-                    No tasks in {column.title.toLowerCase()}
+                      {getTasksByStatus(column.id).length === 0 && (
+                        <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+                          No tasks in {column.title.toLowerCase()}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
-              </div>
-            </div>
-                )}
               </Droppable>
-          ))}
-        </div>
+            ))}
+          </div>
         </DragDropContext>
 
         {/* Stats */}
@@ -262,6 +319,7 @@ export default function TaskBoard() {
           </Card>
         </div>
       </div>
+      <Toaster />
     </div>
   )
 }
