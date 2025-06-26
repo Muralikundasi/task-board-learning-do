@@ -17,6 +17,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Plus, Trash2 } from "lucide-react"
 import type { Task, TaskStatus } from "@/types/task"
+import { DragDropContext, Droppable, Draggable, DropResult, DroppableProvided, DraggableProvided } from "@hello-pangea/dnd"
 
 const COLUMNS: { id: TaskStatus; title: string; color: string }[] = [
   { id: "todo", title: "To Do", color: "border-l-blue-500" },
@@ -77,6 +78,40 @@ export default function TaskBoard() {
 
   const getTasksByStatus = (status: TaskStatus) => {
     return tasks.filter((task) => task.status === status)
+  }
+
+  const onDragEnd = (result: DropResult) => {
+    const { destination, source, draggableId } = result
+    if (!destination) return
+    if (
+      destination.droppableId === source.droppableId &&
+      destination.index === source.index
+    ) {
+      return
+    }
+    setTasks((prev) => {
+      const task = prev.find((t) => t.id === draggableId)
+      if (!task) return prev
+      // Remove from old status
+      const filtered = prev.filter((t) => t.id !== draggableId)
+      // Insert into new status at correct index
+      const updatedTask = { ...task, status: destination.droppableId as TaskStatus }
+      // Get all tasks for the new status
+      const before = filtered.filter((t, i) =>
+        t.status === destination.droppableId && i < destination.index
+      )
+      const after = filtered.filter((t, i) =>
+        t.status === destination.droppableId && i >= destination.index
+      )
+      // Insert updatedTask at the right place
+      const others = filtered.filter((t) => t.status !== destination.droppableId)
+      return [
+        ...others,
+        ...before,
+        updatedTask,
+        ...after,
+      ]
+    })
   }
 
   return (
@@ -144,19 +179,32 @@ export default function TaskBoard() {
         </div>
 
         {/* Task Board */}
+        <DragDropContext onDragEnd={onDragEnd}>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {COLUMNS.map((column) => (
-            <div key={column.id} className="bg-white rounded-lg shadow-sm border">
+              <Droppable droppableId={column.id} key={column.id}>
+                {(provided: DroppableProvided) => (
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    className="bg-white rounded-lg shadow-sm border flex flex-col"
+                  >
               {/* Column Header */}
               <div className={`p-4 border-b border-l-4 ${column.color}`}>
                 <h2 className="font-semibold text-gray-900">{column.title}</h2>
                 <p className="text-sm text-gray-500 mt-1">{getTasksByStatus(column.id).length} tasks</p>
               </div>
-
               {/* Tasks */}
-              <div className="p-4 space-y-3 min-h-[400px]">
-                {getTasksByStatus(column.id).map((task) => (
-                  <Card key={task.id} className="group hover:shadow-md transition-shadow">
+                    <div className="p-4 space-y-3 min-h-[400px] flex-1">
+                      {getTasksByStatus(column.id).map((task, idx) => (
+                        <Draggable draggableId={task.id} index={idx} key={task.id}>
+                          {(provided: DraggableProvided) => (
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.draggableProps}
+                              {...provided.dragHandleProps}
+                            >
+                              <Card className="group hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
                         <CardTitle className="text-sm font-medium leading-tight">{task.title}</CardTitle>
@@ -172,25 +220,13 @@ export default function TaskBoard() {
                     </CardHeader>
                     <CardContent className="pt-0">
                       <CardDescription className="text-xs leading-relaxed mb-3">{task.description}</CardDescription>
-
-                      {/* Move Task Buttons */}
-                      <div className="flex gap-1 flex-wrap">
-                        {COLUMNS.filter((col) => col.id !== task.status).map((col) => (
-                          <Button
-                            key={col.id}
-                            variant="outline"
-                            size="sm"
-                            className="text-xs h-7"
-                            onClick={() => moveTask(task.id, col.id)}
-                          >
-                            Move to {col.title}
-                          </Button>
-                        ))}
-                      </div>
                     </CardContent>
                   </Card>
+                            </div>
+                          )}
+                        </Draggable>
                 ))}
-
+                      {provided.placeholder}
                 {getTasksByStatus(column.id).length === 0 && (
                   <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
                     No tasks in {column.title.toLowerCase()}
@@ -198,8 +234,11 @@ export default function TaskBoard() {
                 )}
               </div>
             </div>
+                )}
+              </Droppable>
           ))}
         </div>
+        </DragDropContext>
 
         {/* Stats */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
