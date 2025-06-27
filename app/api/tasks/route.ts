@@ -5,22 +5,28 @@ import type { Task, CreateTaskRequest, ApiResponse, TaskRow } from "@/types/task
 // GET /api/tasks - Get all tasks
 export async function GET() {
   try {
+    console.log("🔍 Attempting to fetch tasks from Supabase...")
+    console.log("📡 Supabase URL:", process.env.SUPABASE_URL)
+    console.log(" Service key exists:", !!process.env.SUPABASE_SERVICE_ROLE_KEY)
+    
     const { data: tasks, error } = await supabaseServer
       .from("tasks")
       .select("*")
       .order("created_at", { ascending: false })
 
     if (error) {
-      console.error("Supabase error:", error)
+      console.error("❌ Supabase error:", error)
       const errorResponse: ApiResponse = {
         success: false,
-        error: "Failed to fetch tasks from database",
+        error: `Database error: ${error.message}`,
       }
       return NextResponse.json(errorResponse, { status: 500 })
     }
 
+    console.log("✅ Successfully fetched tasks:", tasks?.length || 0)
+
     // Transform database rows to Task objects
-    const transformedTasks: Task[] = (tasks as TaskRow[]).map((task) => ({
+    const transformedTasks: Task[] = (tasks as TaskRow[] || []).map((task) => ({
       id: task.id,
       title: task.title,
       description: task.description,
@@ -37,11 +43,11 @@ export async function GET() {
 
     return NextResponse.json(response, { status: 200 })
   } catch (error) {
-    console.error("Error fetching tasks:", error)
+    console.error("💥 Unexpected error fetching tasks:", error)
 
     const errorResponse: ApiResponse = {
       success: false,
-      error: "Failed to fetch tasks",
+      error: `Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`,
     }
 
     return NextResponse.json(errorResponse, { status: 500 })
@@ -54,19 +60,19 @@ export async function POST(request: NextRequest) {
     const body: CreateTaskRequest = await request.json()
 
     // Validate required fields
-    if (!body.title || !body.description || !body.status) {
+    if (!body.title || !body.status) {
       const errorResponse: ApiResponse = {
         success: false,
-        error: "Missing required fields: title, description, and status are required",
+        error: "Missing required fields: title and status are required",
       }
       return NextResponse.json(errorResponse, { status: 400 })
     }
 
     // Validate title and description are not empty strings
-    if (body.title.trim() === "" || body.description.trim() === "") {
+    if (body.title.trim() === "") {
       const errorResponse: ApiResponse = {
         success: false,
-        error: "Title and description cannot be empty",
+        error: "Title cannot be empty",
       }
       return NextResponse.json(errorResponse, { status: 400 })
     }
@@ -87,7 +93,7 @@ export async function POST(request: NextRequest) {
       .insert([
         {
           title: body.title.trim(),
-          description: body.description.trim(),
+          description: body.description?.trim() || null,
           status: body.status,
         },
       ])

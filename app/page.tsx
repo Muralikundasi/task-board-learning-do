@@ -35,6 +35,8 @@ export default function TaskBoard() {
   const [isCreating, setIsCreating] = useState(false)
   const [newTask, setNewTask] = useState({ title: "", description: "", status: "todo" as TaskStatus })
   const { toast } = useToast()
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+  const [editedTitle, setEditedTitle] = useState("")
 
   // Load tasks on component mount
   useEffect(() => {
@@ -59,10 +61,10 @@ export default function TaskBoard() {
   }
 
   const addTask = async () => {
-    if (!newTask.title.trim() || !newTask.description.trim()) {
+    if (!newTask.title.trim()) {
       toast({
         title: "Validation Error",
-        description: "Please fill in both title and description.",
+        description: "Please fill in the title.",
         variant: "destructive",
       })
       return
@@ -72,8 +74,9 @@ export default function TaskBoard() {
       setIsCreating(true)
       const createdTask = await TaskApiClient.createTask({
         title: newTask.title,
-        description: newTask.description,
         status: newTask.status,
+        // Only include description if it's not empty
+        ...(newTask.description.trim() ? { description: newTask.description } : {})
       })
 
       setTasks([createdTask, ...tasks])
@@ -257,23 +260,53 @@ export default function TaskBoard() {
                           {(provided) => (
                             <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}>
                               <Card className="group hover:shadow-md transition-shadow">
-                                <CardHeader className="pb-3">
-                                  <div className="flex items-start justify-between">
-                                    <CardTitle className="text-sm font-medium leading-tight">{task.title}</CardTitle>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                                      onClick={() => deleteTask(task.id)}
-                                    >
-                                      <Trash2 className="h-4 w-4 text-red-500" />
-                                    </Button>
-                                  </div>
+                                <CardHeader>
+                                  <CardTitle
+                                    className="cursor-pointer"
+                                    onClick={() => {
+                                      setEditingTaskId(task.id)
+                                      setEditedTitle(task.title)
+                                    }}
+                                  >
+                                    {editingTaskId === task.id ? (
+                                      <Input
+                                        autoFocus
+                                        value={editedTitle}
+                                        onChange={e => setEditedTitle(e.target.value)}
+                                        onBlur={async () => {
+                                          if (editedTitle.trim() && editedTitle !== task.title) {
+                                            await TaskApiClient.updateTask(task.id, { title: editedTitle })
+                                            setTasks(prev =>
+                                              prev.map(t => t.id === task.id ? { ...t, title: editedTitle } : t)
+                                            )
+                                          }
+                                          setEditingTaskId(null)
+                                        }}
+                                        onKeyDown={async e => {
+                                          if (e.key === "Enter") {
+                                            if (editedTitle.trim() && editedTitle !== task.title) {
+                                              await TaskApiClient.updateTask(task.id, { title: editedTitle })
+                                              setTasks(prev =>
+                                                prev.map(t => t.id === task.id ? { ...t, title: editedTitle } : t)
+                                              )
+                                            }
+                                            setEditingTaskId(null)
+                                          }
+                                          if (e.key === "Escape") {
+                                            setEditingTaskId(null)
+                                          }
+                                        }}
+                                        className="flex-1"
+                                      />
+                                    ) : (
+                                      task.title
+                                    )}
+                                  </CardTitle>
+                                  <CardDescription>
+                                    {task.description || "No description"}
+                                  </CardDescription>
                                 </CardHeader>
                                 <CardContent className="pt-0">
-                                  <CardDescription className="text-xs leading-relaxed mb-3">
-                                    {task.description}
-                                  </CardDescription>
                                   <div className="text-xs text-gray-400">
                                     Created: {new Date(task.created_at).toLocaleDateString()}
                                   </div>

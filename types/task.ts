@@ -1,7 +1,7 @@
 export interface Task {
   id: string // UUID from Supabase
   title: string
-  description: string
+  description?: string
   status: "todo" | "in-progress" | "done"
   created_at: string // ISO string from Supabase
   updated_at?: string // ISO string from Supabase
@@ -13,7 +13,7 @@ export type TaskStatus = Task["status"]
 export interface TaskRow {
   id: string
   title: string
-  description: string
+  description?: string
   status: TaskStatus
   created_at: string
   updated_at: string
@@ -22,7 +22,7 @@ export interface TaskRow {
 // API request/response types
 export interface CreateTaskRequest {
   title: string
-  description: string
+  description?: string
   status: TaskStatus
 }
 
